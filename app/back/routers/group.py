@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query ,UploadFile, File
 from sqlalchemy.orm import Session
-from .. import database, crud, schemas, auth_utils
+from .. import database, crud, schemas, auth_utils ,models
 from .. import dependencies
+
+import os
+import uuid
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
 
@@ -60,6 +63,22 @@ def search_by_book(
         raise HTTPException(status_code=404, detail="該当するグループが見つかりません")
     return results
 
+
+@router.delete("/{group_id}")
+def delete_group(
+    group_id: int,
+    db: Session = Depends(database.get_db),
+    current_user_id: int = Depends(dependencies.get_current_user_id)
+):
+    """グループを削除する。オーナーのみ可能。"""
+    group = crud.get_group(db, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="グループが見つかりません")
+    if group.owner != current_user_id:
+        raise HTTPException(status_code=403, detail="オーナーのみ削除できます")
+    crud.delete_group(db, group_id)
+    return {"message": "グループを削除しました"}
+
 @router.patch("/{group_id}", response_model=schemas.Group)
 def update_group(
     group_id: int,
@@ -89,8 +108,9 @@ def get_group(
     group = crud.get_group(db, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="グループが見つかりません")
+    if not crud.is_group_member(db, group_id, current_user_id):
+        raise HTTPException(status_code=403, detail="グループメンバーのみ閲覧できます")
     return group
-
 
 @router.post("/{group_id}/join")
 def join_group(
@@ -136,11 +156,102 @@ def create_progress(
 @router.get("/{group_id}/progress", response_model=list[schemas.Progress])
 def get_progresses(
     group_id: int,
+    limit: int = Query(None),  
     db: Session = Depends(database.get_db),
     current_user_id: int = Depends(dependencies.get_current_user_id)
 ):
-    """グループの進捗一覧を取得する。"""
     group = crud.get_group(db, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="グループが見つかりません")
-    return crud.get_group_progresses(db, group_id)
+    return crud.get_group_progresses(db, group_id, limit=limit)
+
+
+@router.patch("/{group_id}/progress/{progress_id}", response_model=schemas.Progress)
+def update_progress(
+    group_id: int,
+    progress_id: int,
+    update_data: schemas.ProgressUpdate,
+    db: Session = Depends(database.get_db),
+    current_user_id: int = Depends(dependencies.get_current_user_id)
+):
+    """進捗を編集する。自分の進捗またはオーナーのみ可能。"""
+    group = crud.get_group(db, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="グループが見つかりません")
+
+    progress = db.query(models.Progress).filter(models.Progress.id == progress_id).first()
+    if not progress:
+        raise HTTPException(status_code=404, detail="進捗が見つかりません")
+
+    if progress.user_id != current_user_id and group.owner != current_user_id:
+        raise HTTPException(status_code=403, detail="編集権限がありません")
+
+    return crud.update_progress(db, progress_id, update_data)
+
+
+@router.delete("/{group_id}/progress/{progress_id}")
+def delete_progress(
+    group_id: int,
+    progress_id: int,
+    db: Session = Depends(database.get_db),
+    current_user_id: int = Depends(dependencies.get_current_user_id)
+):
+    """進捗を削除する。自分の進捗またはオーナーのみ可能。"""
+    group = crud.get_group(db, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="グループが見つかりません")
+
+    progress = db.query(models.Progress).filter(models.Progress.id == progress_id).first()
+    if not progress:
+        raise HTTPException(status_code=404, detail="進捗が見つかりません")
+
+    if progress.user_id != current_user_id and group.owner != current_user_id:
+        raise HTTPException(status_code=403, detail="削除権限がありません")
+
+    crud.delete_progress(db, progress_id)
+    return {"message": "削除しました"}
+
+#~=================================================================
+#　ファイルアップロードのためのエンドポイント
+#~=================================================================
+UPLOAD_DIR = "/app/uploads"
+
+@router.post("/{group_id}/progress/{progress_id}/upload", response_model=schemas.Progress)
+async def upload_progress_file(
+    group_id: int,
+    progress_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db),
+    current_user_id: int = Depends(dependencies.get_current_user_id)
+):
+    """進捗にファイルを添付する。グループメンバーであれば誰でも可能。"""
+    group = crud.get_group(db, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="グループが見つかりません")
+
+    progress = db.query(models.Progress).filter(models.Progress.id == progress_id).first()
+    if not progress:
+        raise HTTPException(status_code=404, detail="進捗が見つかりません")
+    
+    # グループメンバーかチェック
+    if not crud.is_group_member(db, group_id, current_user_id):
+        raise HTTPException(status_code=403, detail="グループメンバーのみアップロードできます")
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename)[1]
+    filename = f"{uuid.uuid4()}{ext}"
+    filepath = os.path.join(UPLOAD_DIR, filename)
+
+    with open(filepath, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    progress.url = f"/uploads/{filename}"
+    progress.file_type = file.content_type
+    db.commit()
+    db.refresh(progress)
+
+    return progress

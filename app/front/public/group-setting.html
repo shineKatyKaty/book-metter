@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book-meter - グループ設定</title>
+    <link rel="stylesheet" href="/src/css/style.css">
+    <script src="/src/js/api.js" defer></script>
+    <script src="/src/js/main.js" defer></script>
+</head>
+<body>
+
+<header>
+    <div class="logo">
+        <a href="/public/index.html" style="text-decoration: none;">
+            <h1>📚 Book-meter</h1>
+        </a>
+    </div>
+    <nav class="global-nav">
+        <a href="/public/index.html" class="nav-link">ホーム</a>
+        <a href="/public/search-book.html" class="nav-link">本を探す</a>
+        <a href="/public/search-group.html" class="nav-link">グループを探す</a>
+        <a href="/public/bookshelf.html" class="nav-link">自分の本棚を見る</a>
+    </nav>
+    <div class="user-controls">
+        <span id="header-username">読み込み中...</span>
+        <button class="header-btn" onclick="logout()">ログアウト</button>
+    </div>
+</header>
+
+<main id="group-setting-main" style="max-width:600px; margin:0 auto 40px; padding:20px;">
+    <p style="text-align:center; color:#999; padding:60px;">読み込み中...</p>
+</main>
+
+</body>
+</html>

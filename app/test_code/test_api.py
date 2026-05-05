@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool  # ← 追加
+from sqlalchemy.pool import StaticPool  
 from app.back.database import Base, get_db
 from app.back.main import app
 
@@ -11,7 +11,7 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool,  # ← 追加
+    poolclass=StaticPool,  
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -135,6 +135,43 @@ class TestGroup:
         res = client.get("/api/groups/search/by-name?q=存在しない")
         assert res.status_code == 404
 
+class TestGroupUpdate:
+    def test_update_name(self, client):
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        res = client.patch(f"/api/groups/{group_id}", json={"name": "新しいグループ名"})
+        assert res.status_code == 200
+        assert res.json()["name"] == "新しいグループ名"
+
+    def test_update_is_lock(self, client):
+        signup_and_login(client)
+        group_id = create_test_group(client, is_lock=False).json()["id"]
+        res = client.patch(f"/api/groups/{group_id}", json={"is_lock": True})
+        assert res.status_code == 200
+        assert res.json()["is_lock"] == True
+
+    def test_update_password(self, client):
+        """パスワード変更後に新パスワードで参加できること"""
+        signup_and_login(client)
+        group_id = create_test_group(client, is_lock=True, password="old").json()["id"]
+        client.patch(f"/api/groups/{group_id}", json={"password": "new"})
+        signup_and_login(client, "user2", "pass2")
+        res = client.post(f"/api/groups/{group_id}/join?password=new")
+        assert res.status_code == 200
+
+    def test_update_by_non_owner(self, client):
+        """オーナー以外は更新できないこと"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        signup_and_login(client, "user2", "pass2")
+        res = client.patch(f"/api/groups/{group_id}", json={"name": "乗っ取り"})
+        assert res.status_code == 403
+
+    def test_update_nonexistent_group(self, client):
+        signup_and_login(client)
+        res = client.patch("/api/groups/999", json={"name": "存在しない"})
+        assert res.status_code == 404
+
 class TestMembership:
     def test_join_unlocked_group(self, client):
         signup_and_login(client)
@@ -213,3 +250,156 @@ class TestProgress:
         signup_and_login(client)
         res = client.post("/api/groups/999/progress", json={"start_page": 1, "end_page": 50})
         assert res.status_code == 404
+
+    def test_get_progresses_with_limit(self, client):
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        # 25件登録
+        for i in range(25):
+            client.post(f"/api/groups/{group_id}/progress", json={"start_page": i+1, "end_page": i+1})
+        # limitなしは25件
+        res = client.get(f"/api/groups/{group_id}/progress")
+        assert res.status_code == 200
+        assert len(res.json()) == 25
+        # limit=20は20件
+        res = client.get(f"/api/groups/{group_id}/progress?limit=20")
+        assert res.status_code == 200
+        assert len(res.json()) == 20
+
+    def test_get_progresses_order(self, client):
+        """idの降順（新しい順）で返ってくること"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        res1 = client.post(f"/api/groups/{group_id}/progress", json={"start_page": 1, "end_page": 10})
+        res2 = client.post(f"/api/groups/{group_id}/progress", json={"start_page": 11, "end_page": 20})
+        res = client.get(f"/api/groups/{group_id}/progress")
+        assert res.status_code == 200
+        progresses = res.json()
+        # idが大きい方（後に作成）が先頭
+        assert progresses[0]["id"] > progresses[1]["id"]
+
+class TestProgressFile:
+    def test_upload_file(self, client):
+        """グループメンバーはファイルをアップロードできる"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        progress_id = client.post(f"/api/groups/{group_id}/progress", json={
+            "start_page": 1, "end_page": 50
+        }).json()["id"]
+
+        with open("app/test_code/upload_test.pdf", "rb") as f:
+            res = client.post(
+                f"/api/groups/{group_id}/progress/{progress_id}/upload",
+                files={"file": ("upload_test.pdf", f, "application/pdf")}
+            )
+        assert res.status_code == 200
+        assert res.json()["url"] is not None
+        assert res.json()["file_type"] == "application/pdf"
+
+    def test_upload_file_non_member(self, client):
+        """グループメンバー以外はアップロードできない"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        progress_id = client.post(f"/api/groups/{group_id}/progress", json={
+            "start_page": 1, "end_page": 50
+        }).json()["id"]
+
+        signup_and_login(client, "user2", "pass2")
+        with open("app/test_code/upload_test.pdf", "rb") as f:
+            res = client.post(
+                f"/api/groups/{group_id}/progress/{progress_id}/upload",
+                files={"file": ("upload_test.pdf", f, "application/pdf")}
+            )
+        assert res.status_code == 403
+
+    def test_upload_file_invalid_progress(self, client):
+        """存在しない進捗にはアップロードできない"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+
+        with open("app/test_code/upload_test.pdf", "rb") as f:
+            res = client.post(
+                f"/api/groups/{group_id}/progress/999/upload",
+                files={"file": ("upload_test.pdf", f, "application/pdf")}
+            )
+        assert res.status_code == 404
+
+    def test_update_progress(self, client):
+        """自分の進捗を編集できる"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        progress_id = client.post(f"/api/groups/{group_id}/progress", json={
+            "start_page": 1, "end_page": 50
+        }).json()["id"]
+        res = client.patch(f"/api/groups/{group_id}/progress/{progress_id}", json={
+            "start_page": 10, "end_page": 60, "memo": "修正しました"
+        })
+        assert res.status_code == 200
+        assert res.json()["start_page"] == 10
+        assert res.json()["end_page"] == 60
+        assert res.json()["memo"] == "修正しました"
+
+    def test_update_progress_by_owner(self, client):
+        """オーナーは他のメンバーの進捗を編集できる"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        signup_and_login(client, "user2", "pass2")
+        client.post(f"/api/groups/{group_id}/join")
+        progress_id = client.post(f"/api/groups/{group_id}/progress", json={
+            "start_page": 1, "end_page": 50
+        }).json()["id"]
+        signup_and_login(client)
+        res = client.patch(f"/api/groups/{group_id}/progress/{progress_id}", json={
+            "memo": "オーナーが修正"
+        })
+        assert res.status_code == 200
+
+    def test_update_progress_by_non_owner(self, client):
+        """他のメンバーの進捗は編集できない"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        progress_id = client.post(f"/api/groups/{group_id}/progress", json={
+            "start_page": 1, "end_page": 50
+        }).json()["id"]
+        signup_and_login(client, "user2", "pass2")
+        client.post(f"/api/groups/{group_id}/join")
+        res = client.patch(f"/api/groups/{group_id}/progress/{progress_id}", json={
+            "memo": "乗っ取り"
+        })
+        assert res.status_code == 403
+
+    def test_delete_progress(self, client):
+        """自分の進捗を削除できる"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        progress_id = client.post(f"/api/groups/{group_id}/progress", json={
+            "start_page": 1, "end_page": 50
+        }).json()["id"]
+        res = client.delete(f"/api/groups/{group_id}/progress/{progress_id}")
+        assert res.status_code == 200
+
+    def test_delete_progress_by_non_owner(self, client):
+        """他のメンバーの進捗は削除できない"""
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        progress_id = client.post(f"/api/groups/{group_id}/progress", json={
+            "start_page": 1, "end_page": 50
+        }).json()["id"]
+        signup_and_login(client, "user2", "pass2")
+        client.post(f"/api/groups/{group_id}/join")
+        res = client.delete(f"/api/groups/{group_id}/progress/{progress_id}")
+        assert res.status_code == 403
+
+    def test_delete_group_by_owner(self, client):
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        res = client.delete(f"/api/groups/{group_id}")
+        assert res.status_code == 200
+
+    def test_delete_group_by_non_owner(self, client):
+        signup_and_login(client)
+        group_id = create_test_group(client).json()["id"]
+        signup_and_login(client, "user2", "pass2")
+        client.post(f"/api/groups/{group_id}/join")
+        res = client.delete(f"/api/groups/{group_id}")
+        assert res.status_code == 403

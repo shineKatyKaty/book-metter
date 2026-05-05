@@ -21,7 +21,7 @@ class Group(Base):
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
+    name = Column(String, index=True)
     owner = Column(Integer, ForeignKey("users.id"))
     is_lock = Column(Boolean, default=False)
     password_hash = Column(String, nullable=True)
@@ -40,8 +40,8 @@ class Group(Base):
     cover_url = Column(String, nullable=True)
 
     owner_user = relationship("User", back_populates="owned_groups")
-    membership = relationship("Membership", back_populates="group")
-    progresses = relationship("Progress", back_populates="group")
+    membership = relationship("Membership", back_populates="group" ,cascade="all, delete-orphan")
+    progresses = relationship("Progress", back_populates="group" ,cascade="all, delete-orphan")
     members = association_proxy("membership", "user")
 
 class Membership(Base):

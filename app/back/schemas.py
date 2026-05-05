@@ -28,9 +28,17 @@ class Progress(ProgressBase):
     group_id: int
     user_id: int
     created_at: Optional[datetime] = None
+    url: Optional[str] = None
+    file_type: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+class ProgressUpdate(BaseModel):
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
+    memo: Optional[str] = None
+
 
 class GroupBase(BaseModel):
     name: str

@@ -66,8 +66,13 @@ def create_group(db: Session, group: schemas.GroupCreate, hashed_password: str):
     db.add(db_group)
     db.commit()
     db.refresh(db_group)
-    return db_group
 
+    # オーナーを membership に自動追加
+    membership = models.Membership(group_id=db_group.id, user_id=group.owner)
+    db.add(membership)
+    db.commit()
+
+    return db_group
 def update_group_book(db: Session, group_id: int, book_data: schemas.GroupBase):
     """グループの課題図書情報を更新する"""
     db_group = get_group(db, group_id)
@@ -137,6 +142,18 @@ def get_user_groups(db: Session, user_id: int):
     memberships = db.query(models.Membership).filter_by(user_id=user_id).all()
     return [m.group for m in memberships]
 
+def is_group_member(db: Session, group_id: int, user_id: int) -> bool:
+    return db.query(models.Membership).filter_by(
+        group_id=group_id, user_id=user_id
+    ).first() is not None
+
+def delete_group(db: Session, group_id: int):
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        return False
+    db.delete(group)
+    db.commit()
+    return True
 # =================================================================
 # 3. 進捗操作
 # =================================================================
@@ -152,8 +169,37 @@ def create_progress(db: Session, progress: schemas.ProgressCreate, group_id: int
     db.refresh(db_progress)
     return db_progress
 
-def get_group_progresses(db: Session, group_id: int):
-    return db.query(models.Progress).filter(models.Progress.group_id == group_id).all()
+
+def get_group_progresses(db: Session, group_id: int, limit: int = None):
+    query = db.query(models.Progress)\
+        .filter(models.Progress.group_id == group_id)\
+        .order_by(models.Progress.id.desc())
+    if limit:
+        query = query.limit(limit)
+    return query.all()
+
+def update_progress(db: Session, progress_id: int, update_data: schemas.ProgressUpdate):
+    progress = db.query(models.Progress).filter(models.Progress.id == progress_id).first()
+    if not progress:
+        return None
+    if update_data.start_page is not None:
+        progress.start_page = update_data.start_page
+    if update_data.end_page is not None:
+        progress.end_page = update_data.end_page
+    if update_data.memo is not None:
+        progress.memo = update_data.memo
+    db.commit()
+    db.refresh(progress)
+    return progress
+
+def delete_progress(db: Session, progress_id: int):
+    progress = db.query(models.Progress).filter(models.Progress.id == progress_id).first()
+    if not progress:
+        return False
+    db.delete(progress)
+    db.commit()
+    return True
+
 
 def calculate_total_progress(logs):
     if not logs:
@@ -166,3 +212,4 @@ def calculate_total_progress(logs):
         else:
             merged[-1][1] = max(merged[-1][1], end)
     return sum(end - start + 1 for start, end in merged)
+
