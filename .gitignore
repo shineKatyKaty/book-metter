@@ -20,5 +20,8 @@ Thumbs.db
 
 *.env
 
-uploads/*
-.uploads/*
+uploads/
+.uploads/
+*uploads/
+
+test_result.txt
