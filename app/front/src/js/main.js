@@ -270,44 +270,36 @@ function renderBookResult(book) {
 }
 
 function openCreateModal(book) {
-    selectedBook = book;
-    document.getElementById('modal-book-title').innerText  = book.title || '(タイトル不明)';
-    document.getElementById('modal-book-author').innerText = book.author || '';
-    const coverEl = document.getElementById('modal-book-cover');
-    coverEl.src = book.small_cover_url || '';
-    coverEl.style.display = book.small_cover_url ? 'block' : 'none';
-
-    document.getElementById('modal-total-pages').value = '';
+    if (!book) {
+        document.getElementById('modal-book-title').innerText  = '';
+        document.getElementById('modal-book-author').innerText = '';
+        const coverEl = document.getElementById('modal-book-cover');
+        coverEl.src = '';
+        coverEl.style.display = 'none';
+        document.getElementById('modal-book-info').style.display = 'none';
+        document.getElementById('modal-book-info-inputs').style.display = 'block';
+    document.getElementById('modal-group-name').value  = '';
+    }else {
+        selectedBook = book;
+        document.getElementById('modal-book-title').innerText  = book.title || '(タイトル不明)';
+        document.getElementById('modal-book-author').innerText = book.author || '';
+        const coverEl = document.getElementById('modal-book-cover');
+        coverEl.src = book.small_cover_url || '';
+        coverEl.style.display = book.small_cover_url ? 'block' : 'none';
+        document.getElementById('modal-book-info').style.display = 'flex';
+        document.getElementById('modal-book-info-inputs').style.display = 'none';
     document.getElementById('modal-group-name').value  = book.title ? `${book.title}読書会` : '';
+    }
+    document.getElementById('modal-total-pages').value = '';
     document.getElementById('modal-is-lock').checked   = false;
     document.getElementById('modal-password').value    = '';
     document.getElementById('password-field').style.display = 'none';
     document.getElementById('create-modal').style.display   = 'flex';
 }
 
-function openCreateBookModal() {
-    document.getElementById('modal-book-title').innerText  = '';
-    document.getElementById('modal-book-author').innerText = '';
-    const coverEl = document.getElementById('modal-book-cover');
-    coverEl.src = '';
-    coverEl.style.display = 'none';
-
-    document.getElementById('modal-total-pages').value = '';
-    document.getElementById('modal-group-name').value  = '';
-    document.getElementById('modal-is-lock').checked   = false;
-    document.getElementById('modal-password').value    = '';
-    document.getElementById('password-field').style.display = 'none';
-    document.getElementById('create-book-modal').style.display   = 'flex';
-
-}    
 
 function closeCreateModal() {
     document.getElementById('create-modal').style.display = 'none';
-    selectedBook = null;
-}
-
-function closeCreateBookModal() {
-    document.getElementById('create-book-modal').style.display = 'none';
     selectedBook = null;
 }
 
@@ -317,13 +309,13 @@ function togglePasswordField() {
 }
 
 
-function toggleBookPasswordField() {
-    const isLock = document.getElementById('modal-book-is-lock').checked;
-    document.getElementById('book-password-field').style.display = isLock ? 'block' : 'none';
-}
 
 async function submitCreateGroup() {
-    if (!selectedBook || !currentUser) return;
+    if (!currentUser) return;
+    const title = selectedBook?.title || document.getElementById('modal-title-input').value.trim();
+    const author = selectedBook?.author || document.getElementById('modal-author-input').value.trim();
+
+    if (!title) { alert("タイトルを入力してください"); return; }
 
     const totalPages = parseInt(document.getElementById('modal-total-pages').value);
     const groupName  = document.getElementById('modal-group-name').value.trim();
@@ -339,17 +331,17 @@ async function submitCreateGroup() {
         owner:         currentUser.id,
         is_lock:       isLock,
         password:      password || "none",
-        title:         selectedBook.title         || null,
+        title:         title || null,
         total_pages:   totalPages,
-        author:        selectedBook.author        || null,
-        publisher:     selectedBook.publisher     || null,
-        published_date:selectedBook.published_date|| null,
-        description:   selectedBook.description   || null,
-        self_link:     selectedBook.self_link      || null,
-        api_id:        selectedBook.api_id         || null,
-        api_etag:      selectedBook.api_etag       || null,
-        small_cover_url:selectedBook.small_cover_url|| null,
-        cover_url:     selectedBook.cover_url      || null,
+        author:        author || null,
+        publisher: selectedBook?.publisher ?? null,
+        published_date:selectedBook?.published_date  ?? null,
+        description:   selectedBook?.description   ?? null,
+        self_link:     selectedBook?.self_link     ?? null,
+        api_id:        selectedBook?.api_id        ?? null,
+        api_etag:      selectedBook?.api_etag      ?? null,
+        small_cover_url:selectedBook?.small_cover_url ?? null,
+        cover_url:     selectedBook?.cover_url     ?? null,
     };
 
     try {
@@ -362,48 +354,6 @@ async function submitCreateGroup() {
     }
 }
 
-async function submitCreateBookGroup() {
-
-    const title = document.getElementById('modal-book-title-input').value.trim();
-    const author = document.getElementById('modal-book-author-input').value.trim();
-
-    const totalPages = parseInt(document.getElementById('modal-book-total-pages').value);
-    const groupName  = document.getElementById('modal-book-group-name').value.trim();
-    const isLock     = document.getElementById('modal-book-is-lock').checked;
-    const password   = document.getElementById('modal-book-password').value;
-
-    if (!title) { alert("タイトルを入力してください"); return; }
-    if (!totalPages || totalPages < 1) { alert("総ページ数を入力してください"); return; }
-    if (!groupName)                    { alert("グループ名を入力してください"); return; }
-    if (isLock && !password)           { alert("パスワードを入力してください"); return; }
-
-    const data = {
-        name:          groupName,
-        owner:         currentUser.id,
-        is_lock:       isLock,
-        password:      password || "none",
-        title:         title         || null,
-        total_pages:   totalPages,
-        author:        author        || null,
-        publisher:   null,
-        published_date: null,
-        description:    null,
-        self_link:      null,
-        api_id:         null,
-        api_etag:       null,
-        small_cover_url: null,
-        cover_url:      null,
-    };
-
-    try {
-        const group = await postCreateGroup(data);
-        alert(`グループ「${group.name}」を作成しました！`);
-        closeCreateBookModal();
-        window.location.href = `/public/group-detail.html?id=${group.id}`;
-    } catch (e) {
-        alert("エラー: " + e.message);
-    }
-}
 
 // ========================================
 // bookshelf.html: 自分の本棚
